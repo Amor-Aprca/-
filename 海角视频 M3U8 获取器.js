@@ -32,7 +32,7 @@
         btn.textContent = '提取 M3U8';
         btn.style.cssText = `
             position: fixed;
-            top: 30px;
+            top: 50px;
             right: 30px;
             padding: 12px 18px;
             background: #007bff;
