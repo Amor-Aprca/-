@@ -1,14 +1,16 @@
 // ==UserScript==
-// @name         海角视频 M3U8 获取器
-// @name:zh-CN   海角视频 M3U8 获取器
+// @name         海角视频 M3U8 获取器ui 0.2.0
+// @name:zh-CN   海角视频 M3U8 获取器ui 0.2.0
 // @name:en      HAIJIO Video M3U8 Extractor
 // @namespace    http://tampermonkey.net/
-// @version      5.0.0
+// @version      0.2.0
 // @description  Extract M3U8 video URLs from HAIJIO website
 // @match        *://www.haijiao.com/*
 // @grant        GM_xmlhttpRequest
 // @license      MIT
 // @connect      *
+// @updateURL    https://raw.githubusercontent.com/Amor-Aprca/-/main/%E6%B5%B7%E8%A7%92%E8%A7%86%E9%A2%91%20M3U8%20%E8%8E%B7%E5%8F%96%E5%99%A8.js
+// @downloadURL  https://raw.githubusercontent.com/Amor-Aprca/-/main/%E6%B5%B7%E8%A7%92%E8%A7%86%E9%A2%91%20M3U8%20%E8%8E%B7%E5%8F%96%E5%99%A8.js
 // ==/UserScript==
 
 (function() {
@@ -30,8 +32,8 @@
         btn.textContent = '提取 M3U8';
         btn.style.cssText = `
             position: fixed;
-            top: 10px;
-            right: 10px;
+            top: 30px;
+            right: 30px;
             padding: 12px 18px;
             background: #007bff;
             color: white;
@@ -80,6 +82,7 @@
                 btn.textContent = '提取 M3U8';
                 btn.disabled = false;
                 btn.style.background = '#007bff';
+                hasExtracted = false;
             }
         }, 5000);
 
@@ -90,12 +93,12 @@
     // 从页面查找TS
     function findTsInPage() {
         const html = document.body.innerHTML;
-        const tsPattern = /https:\/\/[^"'\\s]+?\.ts[^"'\\s]*/gi;
+        const tsPattern = /https:\/\/[^"'\s]+?\.ts[^"'\s]*/gi;
         const matches = html.match(tsPattern);
 
         if (matches) {
             matches.forEach(url => {
-                if (url.includes('ts.hj') && !tsUrls.includes(url)) {
+                if (/ts\d*\.hj/.test(url) && !tsUrls.includes(url)) {
                     tsUrls.push(url);
                     currentTsUrl = url;
                 }
@@ -109,7 +112,7 @@
         const originalFetch = window.fetch;
         window.fetch = function(...args) {
             const url = args[0];
-            if (typeof url === 'string' && url.includes('.ts') && url.includes('ts.hj')) {
+            if (typeof url === 'string' && url.includes('.ts') && /ts\d*\.hj/.test(url)) {
                 addTsUrl(url);
             }
             return originalFetch.apply(this, args);
@@ -117,7 +120,7 @@
 
         const originalXHROpen = XMLHttpRequest.prototype.open;
         XMLHttpRequest.prototype.open = function(method, url, ...args) {
-            if (typeof url === 'string' && url.includes('.ts') && url.includes('ts.hj')) {
+            if (typeof url === 'string' && url.includes('.ts') && /ts\d*\.hj/.test(url)) {
                 addTsUrl(url);
             }
             return originalXHROpen.apply(this, [method, url, ...args]);
@@ -133,7 +136,7 @@
             setTimeout(() => {
                 const resources = performance.getEntries();
                 resources.forEach(resource => {
-                    if (resource.name.includes('.ts') && resource.name.includes('ts.hj')) {
+                    if (resource.name.includes('.ts') && /ts\d*\.hj/.test(resource.name)) {
                         addTsUrl(resource.name);
                     }
                 });
@@ -183,16 +186,18 @@
         GM_xmlhttpRequest({
             method: 'GET',
             url: m3u8Url,
-            timeout: 10000,
+            timeout: 15000,
+            headers: { 'Range': 'bytes=0-1023' },
             onload: response => {
-                if (response.status === 200) {
-                    const lineCount = (response.responseText.match(/\n/g) || []).length + 1;
-                    const duration = calculateDuration(response.responseText);
+                if (response.status === 200 || response.status === 206) {
+                    const text = response.responseText;
+                    const lineCount = (text.match(/#EXTINF:/g) || []).length;
+                    const duration = calculateDuration(text);
+                    const displayCount = response.status === 206 ? lineCount + '+' : lineCount;
 
-                    showResult('✅ 成功！', m3u8Url, `${duration} | ${lineCount}个片段`);
+                    showResult('✅ 成功！', m3u8Url, `${duration} | ${displayCount}个片段`);
 
-                    // 直接进行播放测试
-                    setTimeout(() => testPlay(m3u8Url, duration, lineCount), 1000);
+                    setTimeout(() => testPlay(m3u8Url, duration, displayCount), 1000);
                 } else {
                     showResult('❌ 无法访问 (HTTP ' + response.status + ')', m3u8Url, '');
                 }
@@ -228,7 +233,12 @@
 
         document.body.appendChild(video);
 
+        const playTimeout = setTimeout(() => {
+            if (video.parentNode) video.parentNode.removeChild(video);
+        }, 5000);
+
         video.addEventListener('loadedmetadata', () => {
+            clearTimeout(playTimeout);
             showResult('✅ 视频已加载', m3u8Url, `${duration} | ${lineCount}个片段`);
         });
 
@@ -237,10 +247,11 @@
         });
 
         video.addEventListener('error', () => {
+            clearTimeout(playTimeout);
+            if (video.parentNode) video.parentNode.removeChild(video);
             showResult('⚠️ 播放可能有问题', m3u8Url, `${duration} | ${lineCount}个片段`);
         });
 
-        // 10秒后自动移除
         setTimeout(() => {
             if (video.parentNode) {
                 video.parentNode.removeChild(video);
@@ -323,7 +334,7 @@
                 </div>
             </div>
             <div style="display: flex; gap: 8px;">
-                <button onclick="navigator.clipboard.writeText('${url}').then(() => this.textContent='已复制'); this.textContent='复制'" style="
+                <button onclick="navigator.clipboard.writeText('${url}').then(() => { this.textContent='已复制'; setTimeout(() => this.textContent='复制', 1500); })" style="
                     flex: 1;
                     padding: 12px;
                     background: #2196f3;
